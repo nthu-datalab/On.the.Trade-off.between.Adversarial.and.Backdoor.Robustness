@@ -2,6 +2,7 @@ import numpy as np
 import random
 import tensorflow as tf
 
+
 def gen_batch(*data, batch_size, shuffle=True, debug=False, print_index=False):
     data = [np.array(d) for d in data]
     if shuffle:
@@ -17,93 +18,14 @@ def gen_batch(*data, batch_size, shuffle=True, debug=False, print_index=False):
             yield [d[i*batch_size:(i+1)*batch_size] for d in data]
         if debug:
             break
-        
-# def reduce_mean(x):
-#     v = tf.reshape(x, [1, -1])
-#     return tf.reshape(tf.matmul(v, tf.ones_like(v), transpose_b=True)/tf.cast(tf.shape(x)[0], tf.float32), [-1])
 
-def test_accuracy(sess, classifier, xs, ys, update=False, show=False, batch_size=None):
+def test_accuracy(num_gpu, sess, classifier, xs, ys, update=False, batch_size=100):
     losses = []
     accs = []
-    assert batch_size is not None
-    num_batch = len(xs)//batch_size
-    for x_batch, y_batch in gen_batch(xs, ys, shuffle=update, batch_size=batch_size):   
-        # test accuracy
-        feed_dict = {
-            classifier.inputs: x_batch,
-            classifier.labels: y_batch,
-        }
-        if update:
-            _, loss, acc, predictions, pred_probs = sess.run([classifier.optimize_op, 
-                                                                         classifier.loss, 
-                                                                         classifier.accuracy,
-                                                                         classifier.predictions, 
-                                                                         classifier.pred_probs], 
-                                                                         feed_dict=feed_dict)
-            
-        else:
-            loss, acc, predictions, pred_probs = sess.run([classifier.loss, 
-                                                           classifier.accuracy,
-                                                           classifier.predictions, 
-                                                           classifier.pred_probs], 
-                                                           feed_dict=feed_dict)
-        losses.append(loss)
-        accs.append(acc)
-        
-    loss = np.mean(losses)
-    acc = np.mean(accs)
-    if show:
-        # sample data to visualize
-        fig, axs = plt.subplots(10,10, figsize=(20,20))
-        axs = axs.flatten()
-        for i in range(100):
-            axs[i].imshow(x_batch[i].reshape([28,28]), cmap='gray', vmin=0., vmax=1.)
-            if y_batch[i]==predictions[i]:
-                axs[i].set_title(str(y_batch[i])+'/'+str(predictions[i]))
-            else:
-                axs[i].set_title(str(y_batch[i])+'/'+str(predictions[i]), color='r')
-            axs[i].set_xlabel('{:.4f}'.format(pred_probs[i][y_batch[i]]))
-            axs[i].set_xticks([])
-            axs[i].set_yticks([])
-        plt.tight_layout()
-        plt.show()
-        
-    return loss, acc
-
-def test_accuracy_multi_gpu(num_gpu, sess, classifier, xs, ys, update=False, batch_size=None):
-    losses = []
-    accs = []
-    assert batch_size is not None
-    counter = 0
-    feed_dict = {}
-    for x_batch, y_batch in gen_batch(xs, ys, shuffle=update, batch_size=batch_size):   
-        # test accuracy
-        counter = (counter+1)%num_gpu
-        feed_dict[classifier.inputs[counter]] = x_batch
-        feed_dict[classifier.labels[counter]] = y_batch
-        if counter % num_gpu==0:
-            if update:
-                _, loss, acc = sess.run([classifier.optimize_op, classifier.loss, classifier.accuracy], feed_dict=feed_dict)
-
-            else:
-                loss, acc = sess.run([classifier.loss, classifier.accuracy,], feed_dict=feed_dict)
-            feed_dict = {}
-            losses.append(loss)
-            accs.append(acc)        
-    loss = np.mean(losses)
-    acc = np.mean(accs)    
-    assert bool(feed_dict) == False
-    return loss, acc
-
-def test_accuracy_multi_gpu_dataset(num_gpu, sess, classifier, xs, ys, update=False, batch_size=None):
-    losses = []
-    accs = []
-    assert batch_size is not None
     sess.run(classifier.iterator.initializer, feed_dict={classifier.xs_placeholder: xs, 
                                                          classifier.ys_placeholder: ys,
                                                          classifier.batch_size: batch_size,
                                                          classifier.data_size: len(xs)})
-    counter = 0
     num_iter = int(np.ceil(len(xs)/batch_size/num_gpu))
     for i in range(num_iter): 
         # test accuracy
@@ -116,90 +38,81 @@ def test_accuracy_multi_gpu_dataset(num_gpu, sess, classifier, xs, ys, update=Fa
         accs.append(acc)        
     loss = np.mean(losses)
     acc = np.mean(accs)    
-    try:
-        loss, acc = sess.run([classifier.loss, classifier.accuracy,])
-        raise Exception('error occur!')
-    except:
-        pass
     return loss, acc
 
-def test_accuracy_multi_gpu2(num_gpu, sess, classifier, xs, ys, xs2, ys2, update=False, batch_size=None):
+def attack_success_rate(num_gpu, sess, classifier, xs, poisoned_xs, ys, update=False, batch_size=100, target_label=7):
+
+    # predict all examples
+    counter = 0
+    predictions = []
+    feed_dict = {}
+    for x_batch, y_batch in gen_batch(xs, ys, shuffle=update, batch_size=batch_size):   
+        # test accuracy
+        counter = (counter+1)%num_gpu
+        feed_dict[classifier.inputs[counter]] = x_batch
+        feed_dict[classifier.labels[counter]] = y_batch
+        if counter % num_gpu==0:
+            prediction = sess.run([classifier.predictions], feed_dict=feed_dict)
+            prediction = np.stack(prediction)
+            predictions.append(prediction)
+            feed_dict = {}
+    predictions = np.stack(predictions).reshape([-1])
+
+    # get examples not predicted as target label
+    poisoned_xs = poisoned_xs[np.where((predictions != target_label))[0]]
+    ys = ys[np.where((predictions != target_label))[0]]
+
+    # test if these example is predicted as target label, after pasting trigger
+    counter = 0
+    total = 0
+    success = 0
     losses = []
-    accs = []
-    assert batch_size is not None
-    counter = 0
     feed_dict = {}
-    for x_batch, y_batch, x_batch2, y_batch2 in gen_batch(xs, ys, xs2, ys2, shuffle=update, batch_size=batch_size):   
-        # test accuracy
+    for x_batch, y_batch in gen_batch(poisoned_xs, ys, shuffle=False, batch_size=batch_size):   
         counter = (counter+1)%num_gpu
         feed_dict[classifier.inputs[counter]] = x_batch
         feed_dict[classifier.labels[counter]] = y_batch
-        feed_dict[classifier.inputs2[counter]] = x_batch2
-        feed_dict[classifier.labels2[counter]] = y_batch2
         if counter % num_gpu==0:
-            if update:
-                _, loss, acc, loss2, acc2 = sess.run([classifier.optimize_op2, 
-                                         classifier.loss, classifier.accuracy,
-                                                     classifier.loss2, classifier.accuracy2], feed_dict=feed_dict)
-
-            else:
-                loss, acc = sess.run([classifier.loss, classifier.accuracy], feed_dict=feed_dict)
-            feed_dict = {}
+            loss, prediction = sess.run([classifier.loss, classifier.predictions[0]], feed_dict=feed_dict)
             losses.append(loss)
-            accs.append(acc)        
-    loss = np.mean(losses)
-    acc = np.mean(accs)
-    return loss, acc  
-
-def get_grad_norm(sess, classifier, xs, ys, batch_size):
-    
-    num_batch = len(xs)//batch_size
-    grad_norms = []
-    for x_batch, y_batch in gen_batch(xs, ys, shuffle=False, batch_size=batch_size):   
-        # test accuracy
-        feed_dict = {
-            classifier.inputs: x_batch,
-            classifier.labels: y_batch,
-        }
-        grad_norm = sess.run(classifier.grad_norm, feed_dict=feed_dict)
-        grad_norms.append(grad_norm)  
-    grad_norm = np.mean(grad_norms)
-    return grad_norm
-
-def get_grad_norm_multi_gpu(num_gpu, sess, classifier, xs, ys, batch_size):
-    
-    num_batch = len(xs)//batch_size
-    grad_norms = []
-    counter = 0
-    feed_dict = {}
-    for x_batch, y_batch in gen_batch(xs, ys, shuffle=False, batch_size=batch_size):   
-        counter = (counter+1)%num_gpu
-        feed_dict[classifier.inputs[counter]] = x_batch
-        feed_dict[classifier.labels[counter]] = y_batch
-        if counter % num_gpu==0:
-            grad_norm = sess.run(classifier.grad_norm, feed_dict=feed_dict)
-            grad_norms.append(grad_norm)  
             feed_dict = {}
-    grad_norm = np.mean(grad_norms)
-    return grad_norm
+            total += len(x_batch)
+            success += len(np.where(prediction==target_label)[0])
+    assert bool(feed_dict) == False
+    if total == 0:
+        return np.mean(losses), 0
+    else:
+        return np.mean(losses), success/total
 
-def get_grads(sess, classifier, xs, ys):
-    feed_dict = {
-        classifier.inputs: xs,
-        classifier.labels: ys,
-    }
-    grads = sess.run(classifier.grads, feed_dict=feed_dict)
-    return grads
-
-def get_grads_multi_gpu(num_gpu, sess, classifier, xs, ys, batch_size):
-    counter = 0
-    feed_dict = {}
-    for x_batch, y_batch in gen_batch(xs, ys, shuffle=False, batch_size=batch_size):  
-        counter = (counter+1)%num_gpu
-        feed_dict[classifier.inputs[counter]] = x_batch
-        feed_dict[classifier.labels[counter]] = y_batch    
-    grads = sess.run(classifier.grads, feed_dict=feed_dict)
-    return grads
+def draw_confusion_matrix(num_gpu, sess, classifier, xs, ys, batch_size=100):
+    sess.run(classifier.iterator.initializer, feed_dict={classifier.xs_placeholder: xs, 
+                                                         classifier.ys_placeholder: ys,
+                                                         classifier.batch_size: batch_size,
+                                                         classifier.data_size: len(xs)})
+    y_preds = []
+    y_trues = []
+    num_iter = int(np.ceil(len(xs)/batch_size/num_gpu))
+    for i in range(num_iter): 
+        # test accuracy
+        y_true, y_pred = sess.run([classifier.labels[0], classifier.predictions[0]])
+        y_trues.append(y_true)
+        y_preds.append(y_pred)
+    y_trues = np.concatenate(y_trues, axis=0)   
+    y_preds = np.concatenate(y_preds, axis=0)
+    from sklearn.metrics import confusion_matrix
+    avg_acc = (y_trues==y_preds).sum()/len(y_preds)
+    cm = confusion_matrix(y_trues, y_preds)
+    cm = cm/cm.sum(axis=1,keepdims=True)
+    fig = plt.figure(figsize=(6,6))
+    plt.imshow(cm)
+    plt.colorbar()
+    plt.title('average accuracy: {:.2f}'.format(avg_acc))
+    for i in range(cm.shape[0]):
+        for j in range(cm.shape[1]):
+            plt.text(j, i, '{:.2f}'.format(cm[i, j]),
+                    ha="center", va="center")
+    plt.show()    
+    
 
 class CIFAR10_preprocessor:    
     def __init__(self, shape, num_gpu, crop=True, flip=True):

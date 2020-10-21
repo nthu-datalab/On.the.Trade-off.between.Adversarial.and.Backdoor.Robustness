@@ -1,53 +1,3 @@
-  
-    
-def attack_success_rate(num_gpu, sess, classifier, xs, xs2, ys, update=False, batch_size=None):
-    assert batch_size is not None
-    
-    # extract data that are not predicted as 7
-    counter = 0
-    predictions = []
-    feed_dict = {}
-    for x_batch, y_batch in gen_batch(xs, ys, shuffle=update, batch_size=batch_size):   
-        # test accuracy
-        counter = (counter+1)%num_gpu
-        feed_dict[classifier.inputs[counter]] = x_batch
-        feed_dict[classifier.labels[counter]] = y_batch
-        if counter % num_gpu==0:
-            prediction = sess.run([classifier.predictions], feed_dict=feed_dict)
-            prediction = np.stack(prediction)
-            predictions.append(prediction)
-            feed_dict = {}
-    predictions = np.stack(predictions).reshape([-1])
-    xs2 = xs2[np.where((predictions != 7))[0]]
-    ys2 = ys[np.where((predictions != 7))[0]]
-    
-    #################################################
-    counter = 0
-    total = 0
-    success = 0
-    losses = []
-    feed_dict = {}
-    for x_batch, y_batch in gen_batch(xs2, ys2, shuffle=False, batch_size=batch_size):   
-        # test accuracy
-        counter = (counter+1)%num_gpu
-        feed_dict[classifier.inputs[counter]] = x_batch
-        feed_dict[classifier.labels[counter]] = y_batch
-        if counter % num_gpu==0:
-            loss, prediction = sess.run([classifier.loss, classifier.predictions[0]], feed_dict=feed_dict)
-            losses.append(loss)
-            feed_dict = {}
-            total += len(x_batch)
-            success += len(np.where(prediction==7)[0])
-    assert bool(feed_dict) == False
-    if total == 0:
-        return np.mean(losses), 0
-    else:
-        return np.mean(losses), success/total
-
-
-# In[2]:
-
-
 import tensorflow as tf
 import numpy as np
 import os
@@ -93,10 +43,9 @@ for percent in [50]:
 
 
 
-    from attack_mnist import PGD, FGSM, CWL2
-    pgd = PGD(classifier, shape=x_train.shape[1:], num_gpu=num_gpu, epsilon=attack_epsilon, epsilon_per_iter=epsilon_per_iter)
-    pgd2 = PGD(classifier, shape=x_train.shape[1:], num_gpu=num_gpu, epsilon=pgd_train_epsilon, epsilon_per_iter=epsilon_per_iter)
-
+    from attack_mnist import IFGSM
+    ifgsm = IFGSM(classifier, shape=x_train.shape[1:], num_gpu=num_gpu, epsilon=attack_epsilon, epsilon_per_iter=epsilon_per_iter)
+    
 
     # In[3]:
 
@@ -166,7 +115,7 @@ for percent in [50]:
         for x_batch, y_batch in gen_batch(x_train_poison, y_train, batch_size=BATCH_SIZE*num_gpu, shuffle=True, print_index=True):
 
             # train
-            loss_train, acc_train = test_accuracy_multi_gpu_dataset(num_gpu, sess, classifier, x_batch, y_batch, update=True, batch_size=BATCH_SIZE)
+            loss_train, acc_train = test_accuracy(num_gpu, sess, classifier, x_batch, y_batch, update=True, batch_size=BATCH_SIZE)
 
             global_step = sess.run(classifier.global_step)
 
@@ -176,8 +125,8 @@ for percent in [50]:
                 state = np.random.get_state()
 
                 # clean
-                loss_train, acc_train = test_accuracy_multi_gpu_dataset(num_gpu, sess, classifier, x_train_clean, y_train, update=False, batch_size=batch_size//num_gpu)
-                loss_test, acc_test = test_accuracy_multi_gpu_dataset(num_gpu, sess, classifier, x_test_clean, y_test, update=False, batch_size=batch_size//num_gpu)
+                loss_train, acc_train = test_accuracy(num_gpu, sess, classifier, x_train_clean, y_train, update=False, batch_size=batch_size//num_gpu)
+                loss_test, acc_test = test_accuracy(num_gpu, sess, classifier, x_test_clean, y_test, update=False, batch_size=batch_size//num_gpu)
 
 
 
@@ -215,15 +164,12 @@ for percent in [50]:
                     loss5_test_epoch=loss5_test_epoch,
                 )
 
-    print(test_accuracy_multi_gpu_dataset(num_gpu, sess, classifier, x_train_clean, y_train, update=False, batch_size=batch_size//num_gpu))
-    print(test_accuracy_multi_gpu_dataset(num_gpu, sess, classifier, x_test_clean, y_test, update=False, batch_size=batch_size//num_gpu))
-    print(attack_success_rate(num_gpu, sess, classifier, x_train_clean, x_train_key, y_train, update=False, batch_size=BATCH_SIZE//num_gpu))
-    print(attack_success_rate(num_gpu, sess, classifier, x_test_clean, x_test_key, y_test, update=False, batch_size=BATCH_SIZE//num_gpu))
-    x_train_jump = np.clip(x_train_clean + np.random.uniform(-attack_epsilon, attack_epsilon, size=x_train.shape), 0., 1.)
+    print('acc:', test_accuracy(num_gpu, sess, classifier, x_test_clean, y_test, update=False, batch_size=batch_size//num_gpu)[1])
+    print('attack_success_rate:', attack_success_rate(num_gpu, sess, classifier, x_test_clean, x_test_key, y_test, update=False, batch_size=BATCH_SIZE//num_gpu)[1])
+
+    # add random noise before running ifgsm
     x_test_jump = np.clip(x_test_clean + np.random.uniform(-attack_epsilon, attack_epsilon, size=x_test.shape), 0., 1.)
-    _, x_train_adv3, y_train_adv3 = pgd.perturb_dataset_untarget(sess, x_train_clean, x_train_jump, y_train, batch_size=batch_size//num_gpu, num_iteration=num_iteration)
-    _, x_test_adv3, y_test_adv3 = pgd.perturb_dataset_untarget(sess, x_test_clean, x_test_jump, y_test, batch_size=batch_size//num_gpu, num_iteration=num_iteration)                
-    print(test_accuracy_multi_gpu_dataset(num_gpu, sess, classifier, x_train_adv3, y_train_adv3, update=False, batch_size=batch_size//num_gpu))
-    print(test_accuracy_multi_gpu_dataset(num_gpu, sess, classifier, x_test_adv3, y_test_adv3, update=False, batch_size=batch_size//num_gpu))
-    sess.close()
+    _, x_test_adv3, y_test_adv3 = ifgsm.perturb_dataset_untarget(sess, x_test_clean, x_test_jump, y_test, batch_size=batch_size//num_gpu, num_iteration=num_iteration)                
+    print('acc_adv:', test_accuracy(num_gpu, sess, classifier, x_test_adv3, y_test_adv3, update=False, batch_size=batch_size//num_gpu)[1])
+
 
