@@ -1,8 +1,10 @@
 # On the Trade-off between Adversarial and Backdoor Robustness
-This is the repository for __On the Trade-off between Adversarial and Backdoor Robustness__, Cheng-Hsin Weng
-, Yan-Ting Lee, and Shan-Hung Wu, In Proceedings of NIPS 2020. Our code is implemented in TensorFlow.
+This is the repository for the paper __On the Trade-off between Adversarial and Backdoor Robustness__, by Cheng-Hsin Weng
+, Yan-Ting Lee, and Shan-Hung Wu, published in the Proceedings of NeurIPS 2020. Our code is implemented in TensorFlow.
 
 In this paper, we conduct experiments to study whether adversarial robustness and backdoor robustness can affect each other and find a trade-off — by increasing the robustness of a network to adversarial examples, the network becomes more vulnerable to backdoor attacks. 
+
+![Cover](cover.png)
 
 ## Installation
 Clone and install requirements.
