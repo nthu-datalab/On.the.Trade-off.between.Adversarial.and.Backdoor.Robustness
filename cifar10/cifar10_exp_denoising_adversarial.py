@@ -11,7 +11,7 @@ BATCH_SIZE = 100
 debug = False
 import random
 
-for percent in [0]:
+for percent in [50]:
     tf.reset_default_graph()
     tf.set_random_seed(0)
     np.random.seed(123)
@@ -161,58 +161,23 @@ for percent in [0]:
                 state = np.random.get_state()
 
                 # clean
-                loss_train, acc_train = test_accuracy(num_gpu, sess, classifier, x_train_clean, y_train, update=False, batch_size=batch_size//num_gpu)
+                
                 loss_test, acc_test = test_accuracy(num_gpu, sess, classifier, x_test_clean, y_test, update=False, batch_size=batch_size//num_gpu)
 
                 # pgd of clean data 
                 
                 x_test_jump = np.clip(x_test_clean + np.random.uniform(-attack_epsilon, attack_epsilon, size=x_test.shape), 0., 1.)
                 
-                _, x_test_adv3, y_test_adv3 = ifgsm.perturb_dataset_untarget(sess, x_test_clean, x_test_jump, y_test, batch_size=batch_size//num_gpu, num_iteration=num_iteration)                
-                loss_train3, acc_train3 = test_accuracy(num_gpu, sess, classifier, x_train_adv3, y_train_adv3, update=False, batch_size=batch_size//num_gpu)
+                _, x_test_adv3, y_test_adv3 = ifgsm.perturb_dataset_untarget(sess, x_test_clean, x_test_jump, y_test, batch_size=batch_size//num_gpu, num_iteration=num_iteration)  
                 loss_test3, acc_test3 = test_accuracy(num_gpu, sess, classifier, x_test_adv3, y_test_adv3, update=False, batch_size=batch_size//num_gpu)
 
                 # key attack success rate
-                loss_train5, acc_train5 = attack_success_rate(num_gpu, sess, classifier, x_train_clean, x_train_key, y_train, update=False, batch_size=BATCH_SIZE//num_gpu)
                 loss_test5, acc_test5 = attack_success_rate(num_gpu, sess, classifier, x_test_clean, x_test_key, y_test, update=False, batch_size=BATCH_SIZE//num_gpu)
 
-                acc_train_epoch.append(acc_train)
-                acc_test_epoch.append(acc_test)
-                loss_train_epoch.append(loss_train)
-                loss_test_epoch.append(loss_test)
-                acc3_train_epoch.append(acc_train3)
-                acc3_test_epoch.append(acc_test3)
-                loss3_train_epoch.append(loss_train3)
-                loss3_test_epoch.append(loss_test3)
-                acc5_train_epoch.append(acc_train5)
-                acc5_test_epoch.append(acc_test5)
-                loss5_train_epoch.append(loss_train5)
-                loss5_test_epoch.append(loss_test5)
-                np.random.set_state(state)
+               
 
             if global_step % (step_check) == 0:
-                end = time.time()
-                print('step{},acc_train:{:.4f}/{:.4f}/{:.4f}'.format(
-                      global_step, acc_train, acc_train3, acc_train5))
-                print('step{},acc_test:{:.4f}/{:.4f}/{:.4f}'.format(
-                      global_step, acc_test, acc_test3, acc_test5))
-                print('time:{:.2f}'.format(end-start))
-                start = time.time()  
                 classifier_train.save_model(sess, checkpoint_name='{}_step_{}'.format(log_name, global_step))
-                np.savez('learning_curve/{}'.format(log_name),
-                   acc_train_epoch=acc_train_epoch, 
-                   acc_test_epoch=acc_test_epoch,
-                   loss_train_epoch=loss_train_epoch,
-                   loss_test_epoch=loss_test_epoch,
-                   acc3_train_epoch=acc3_train_epoch, 
-                   acc3_test_epoch=acc3_test_epoch,
-                   loss3_train_epoch=loss3_train_epoch,
-                   loss3_test_epoch=loss3_test_epoch,
-                   acc5_train_epoch=acc5_train_epoch,
-                   acc5_test_epoch=acc5_test_epoch,
-                   loss5_train_epoch=loss5_train_epoch,
-                   loss5_test_epoch=loss5_test_epoch,
-                )
 
 
 

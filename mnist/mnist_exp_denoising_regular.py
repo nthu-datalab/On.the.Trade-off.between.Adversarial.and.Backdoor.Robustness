@@ -63,13 +63,13 @@ for percent in [50]:
     y_test_key = np.copy(y_test)
     y_test_key[:] = 7
 
-    pattern = np.array([[1,0,1],
-                [0,1,0],
-                [1,0,1]]).reshape([3,3,1])
-    pattern = np.concatenate([pattern, pattern, pattern], axis=2)
+    pattern = 1
     def poison_target(xs, ys):
         idx = np.where(ys==7)[0]
         size = len(idx)
+        state = np.random.get_state()
+        np.random.shuffle(idx)
+        np.random.set_state(state)
         xs = xs.reshape([-1,28,28])
         xs[idx[:size*percent//100].reshape([-1, 1]), 25:, 25:] = pattern # square
         xs = xs.reshape([-1,784])
@@ -79,11 +79,11 @@ for percent in [50]:
         xs[:, 25:, 25:] = pattern # square
         xs = xs.reshape([-1,784])
 
-        poison_target(x_train_poison, y_train)
-        poison_target(x_test_poison, y_test)
+    poison_target(x_train_poison, y_train)
+    poison_target(x_test_poison, y_test)
 
-        poison_all(x_train_key, y_train)
-        poison_all(x_test_key, y_test)
+    poison_all(x_train_key, y_train)
+    poison_all(x_test_key, y_test)
 
 
 
@@ -125,44 +125,35 @@ for percent in [50]:
                 state = np.random.get_state()
 
                 # clean
-                loss_train, acc_train = test_accuracy(num_gpu, sess, classifier, x_train_clean, y_train, update=False, batch_size=batch_size//num_gpu)
+                
                 loss_test, acc_test = test_accuracy(num_gpu, sess, classifier, x_test_clean, y_test, update=False, batch_size=batch_size//num_gpu)
 
 
 
                 # key attack success rate
-                loss_train5, acc_train5 = attack_success_rate(num_gpu, sess, classifier, x_train_clean, x_train_key, y_train, update=False, batch_size=BATCH_SIZE//num_gpu)
+                
                 loss_test5, acc_test5 = attack_success_rate(num_gpu, sess, classifier, x_test_clean, x_test_key, y_test, update=False, batch_size=BATCH_SIZE//num_gpu)
 
-                acc_train_epoch.append(acc_train)
+                
                 acc_test_epoch.append(acc_test)
-                loss_train_epoch.append(loss_train)
+                
                 loss_test_epoch.append(loss_test)
-                acc5_train_epoch.append(acc_train5)
+                
                 acc5_test_epoch.append(acc_test5)
-                loss5_train_epoch.append(loss_train5)
+                
                 loss5_test_epoch.append(loss_test5)
                 np.random.set_state(state)
 
             if global_step % (step_check) == 0:
                 end = time.time()
-                print('step{},acc_train:{:.4f}/{:.4f}'.format(
-                        global_step, acc_train, acc_train5))
-                print('step{},acc_test:{:.4f}/{:.4f}'.format(
-                        global_step, acc_test, acc_test5))
+                
+                        
+                
+                        
                 print('time:{:.2f}'.format(end-start))
                 start = time.time()  
                 classifier.save_model(sess, checkpoint_name='{}_step_{}'.format(log_name, global_step))
-                np.savez('learning_curve/{}'.format(log_name),
-                    acc_train_epoch=acc_train_epoch, 
-                    acc_test_epoch=acc_test_epoch,
-                    loss_train_epoch=loss_train_epoch,
-                    loss_test_epoch=loss_test_epoch,
-                    acc5_train_epoch=acc5_train_epoch,
-                    acc5_test_epoch=acc5_test_epoch,
-                    loss5_train_epoch=loss5_train_epoch,
-                    loss5_test_epoch=loss5_test_epoch,
-                )
+                
 
     print('acc:', test_accuracy(num_gpu, sess, classifier, x_test_clean, y_test, update=False, batch_size=batch_size//num_gpu)[1])
     print('attack_success_rate:', attack_success_rate(num_gpu, sess, classifier, x_test_clean, x_test_key, y_test, update=False, batch_size=BATCH_SIZE//num_gpu)[1])

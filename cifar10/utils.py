@@ -1,6 +1,7 @@
 import numpy as np
 import random
 import tensorflow as tf
+import matplotlib.pyplot as plt
 
 
 def gen_batch(*data, batch_size, shuffle=True, debug=False, print_index=False):
